@@ -38,8 +38,10 @@ public class Agent {
       gameState.turn += 1;
       gameState.players[0].cities.clear();
       gameState.players[0].units.clear();
+      gameState.players[0].cityTileCount = 0;
       gameState.players[1].cities.clear();
       gameState.players[1].units.clear();
+      gameState.players[1].cityTileCount = 0;
       while (true) {
         final String updateInfo = scanner.nextLine();
         if (updateInfo.equals(IOConstants.DONE.str)) {

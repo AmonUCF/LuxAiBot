@@ -49,4 +49,19 @@ public class Unit {
   public String pillage() {
     return String.format("p %s", this.id);
   }
+
+  @Override
+  public int hashCode() {
+    return this.id.hashCode();
+  }
+
+  @Override
+  public boolean equals(Object o) {
+    Unit u = (Unit) o;
+    return this.id.equals(u.id);
+  }
+
+  public String toString() {
+    return this.id;
+  }
 }

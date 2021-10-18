@@ -11,4 +11,5 @@ public class Cell {
   public boolean hasResource() {
     return this.resource != null && this.resource.amount > 0;
   }
+  public boolean hasCityTile() { return this.citytile != null;}
 }

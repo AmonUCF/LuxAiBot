@@ -7,7 +7,7 @@
       <excludeFolder url="file://$MODULE_DIR$/replays" />
       <excludeFolder url="file://$MODULE_DIR$/errorlogs" />
     </content>
-    <orderEntry type="inheritedJdk" />
+    <orderEntry type="jdk" jdkName="11" jdkType="JavaSDK" />
     <orderEntry type="sourceFolder" forTests="false" />
   </component>
 </module>
