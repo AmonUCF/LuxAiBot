@@ -16,13 +16,9 @@ public class Coordinator {
 
   private ArrayList<Cell> resourceTiles;
 
-  private HashMap<Unit, Position> colonizers;
-
   private static int[] dr = {-1, 0, 1, 0}, dc = {0, -1, 0, 1};
 
-  public Coordinator() {
-    colonizers = new HashMap<>();
-  }
+  public Coordinator() {}
 
   /**
    * Grabs all tiles which are resource squares and stores them in class var
@@ -39,25 +35,7 @@ public class Coordinator {
     }
   }
 
-  private void checkIfColonizersAreValid() {
-    HashSet<Unit> removeSet = new HashSet<>();
-    for (Unit unit : colonizers.keySet()) {
-      Position colonyPos = colonizers.get(unit);
-
-      if (gameMap.getCell(colonyPos.x, colonyPos.y).hasCityTile()) {
-        removeSet.add(unit);
-      }
-    }
-
-    removeSet.forEach(unit -> colonizers.remove(unit));
-  }
-
-  private boolean shouldBuildNewCityTile(GameState gameState) {
-    return colonizers.size() < 1;
-  }
-
-  private ArrayList<String> generateAvailableUnitMovementActions(GameState gameState, ArrayList<Unit> availableUnits) {
-    Navigator navigator = new Navigator(gameState);
+  private ArrayList<String> generateAvailableUnitMovementActions(Navigator navigator, ArrayList<Unit> availableUnits) {
     ArrayList<String> actions = navigator.generateRoutesToResources(availableUnits,
             (ArrayList<Cell>) resourceTiles.stream().filter(cell -> {
               return cell.resource.type.equals(GameConstants.RESOURCE_TYPES.WOOD) ||
@@ -65,59 +43,6 @@ public class Coordinator {
                       cell.resource.type.equals(GameConstants.RESOURCE_TYPES.URANIUM) && player.researchedUranium();
             }).collect(Collectors.toList()));
 
-    return actions;
-  }
-
-  private ArrayList<String> generateFullUnitMovementActions(GameState gameState, ArrayList<Unit> units) {
-    ArrayList<String> actions = new ArrayList<>();
-
-    // Get candidate city location, then find the closest unit and assign it to build the tile.
-    if (!units.isEmpty() && shouldBuildNewCityTile(gameState) && colonizers.isEmpty()) {
-      Surveyor surveyor = new Surveyor(gameState);
-      Position newCity = surveyor.findPotentialCityLocation();
-
-      Optional<Unit> closestUnit = units.stream().min((a, b) -> {
-        int d1 = (int) a.pos.distanceTo(newCity);
-        int d2 = (int) b.pos.distanceTo(newCity);
-        return d1 - d2;
-      });
-
-      System.err.println(TAG + ": FOUND COLONIZER " + newCity.toString());
-      colonizers.put(closestUnit.get(), newCity);
-    }
-
-    for (Unit unit : units) {
-      if (colonizers.containsKey(unit)) {
-        Position colonyPosition = colonizers.get(unit);
-        if (colonyPosition.equals(unit.pos)) {
-          colonizers.remove(unit);
-          actions.add(unit.buildCity());
-          System.err.println(TAG + ": trying to build city tile -> " + colonyPosition.x + " " + colonyPosition.y);
-        } else {
-          Navigator navigator = new Navigator(gameState);
-          actions.add(navigator.generatePathToNewCityTile(unit, colonyPosition));
-        }
-
-        continue;
-      }
-      if (player.cities.size() > 0) {
-        double closestDist = 999999;
-        CityTile closestCityTile = null;
-        for (City city : player.cities.values()) {
-          for (CityTile citytile : city.citytiles) {
-            double dist = citytile.pos.distanceTo(unit.pos);
-            if (dist < closestDist) {
-              closestCityTile = citytile;
-              closestDist = dist;
-            }
-          }
-        }
-        if (closestCityTile != null) {
-          Direction dir = unit.pos.directionTo(closestCityTile.pos);
-          actions.add(unit.move(dir));
-        }
-      }
-    }
     return actions;
   }
 
@@ -140,7 +65,7 @@ public class Coordinator {
 
         // calculates potential fuel available from the current resource
         int fuel = resource.resource.amount;
-        if(resource.resource.type.equals(GameConstants.RESOURCE_TYPES.COAL) && player.researchedCoal())
+        if (resource.resource.type.equals(GameConstants.RESOURCE_TYPES.COAL) && player.researchedCoal())
           fuel *= GameConstants.PARAMETERS.RESOURCE_TO_FUEL_RATE.COAL;
         if (resource.resource.type.equals(GameConstants.RESOURCE_TYPES.URANIUM) && player.researchedUranium())
           fuel *= GameConstants.PARAMETERS.RESOURCE_TO_FUEL_RATE.URANIUM;
@@ -162,10 +87,9 @@ public class Coordinator {
       for (CityTile tile : city.citytiles) {
         if (!tile.canAct()) continue;
         if (player.cityTileCount + workersMade > player.units.size()) {
-          System.err.println("trying to build worker -> " + player.cityTileCount + " " + player.units.size());
           actions.add(tile.buildWorker());
           workersMade++;
-        } else {
+        } else if (!player.researchedUranium()){
           actions.add(tile.research());
         }
       }
@@ -186,8 +110,6 @@ public class Coordinator {
     // get the resource tiles
     getResourceTiles();
 
-    checkIfColonizersAreValid();
-
     // just gets a list of usable units. assumes all units are workers for now
     ArrayList<Unit> availableUnits =
             (ArrayList<Unit>) player.units
@@ -201,9 +123,36 @@ public class Coordinator {
                     .filter(unit -> unit.canAct() && unit.getCargoSpaceLeft() == 0)
                     .collect(Collectors.toList());
 
-    ArrayList<String> towardResourceMovements = generateAvailableUnitMovementActions(gameState, availableUnits);
+    Navigator towardResourceNavigator = new Navigator(gameState);
+    ArrayList<String> towardResourceMovements =
+            generateAvailableUnitMovementActions(towardResourceNavigator, availableUnits);
 
-    ArrayList<String> awayFromResourceMovements = generateFullUnitMovementActions(gameState, fullUnits);
+    Surveyor surveyor = new Surveyor(gameState);
+    HashMap<Unit, String> assignments = surveyor.calculateResourceToCityAssignment(fullUnits);
+
+    Navigator towardCitiesNavigator = new Navigator(gameState);
+    ArrayList<String> towardCityMovements = towardCitiesNavigator.generateRoutesToCities(assignments,
+            towardResourceNavigator);
+
+    // Get all full units which weren't assigned a city
+    ArrayList<Unit> possibleColonizers = (ArrayList<Unit>) fullUnits.stream().filter(unit -> {
+      return !assignments.containsKey(unit);
+    }).collect(Collectors.toList());
+
+    ArrayList<Position> candidateCities = surveyor.findKPotentialCityLocations(Math.min(possibleColonizers.size(), 3));
+
+    ArrayList<String> buildCityActions = new ArrayList<>();
+    for(Position p : candidateCities) {
+      Optional<Unit> reachedGoal =
+              possibleColonizers.stream().filter(unit->p.x==unit.pos.x && p.y==unit.pos.y).findAny();
+      if (reachedGoal.isPresent()) {
+        possibleColonizers.remove(reachedGoal.get());
+        buildCityActions.add(reachedGoal.get().buildCity());
+      }
+    }
+    Navigator colonizerNavigator = new Navigator(gameState);
+    ArrayList<String> colonizerActions = colonizerNavigator.generateRoutesToColonies(possibleColonizers,
+            candidateCities, towardCitiesNavigator);
 
     ArrayList<String> cityActions = generateCityActions(gameState);
 
@@ -213,7 +162,11 @@ public class Coordinator {
     /** AI Code Goes Above! **/
 
     actions.addAll(towardResourceMovements);
-    actions.addAll(awayFromResourceMovements);
+//    actions.addAll(awayFromResourceMovements);
+    actions.addAll(towardCityMovements);
+    actions.addAll(colonizerActions);
+    actions.addAll(buildCityActions);
+
     actions.addAll(cityActions);
     return actions;
   }

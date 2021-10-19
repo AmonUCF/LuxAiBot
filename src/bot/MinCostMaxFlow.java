@@ -22,6 +22,9 @@ public class MinCostMaxFlow{
     public void setMetadata(String s) {
       metadata = s;
     }
+    public String toString() {
+      return "("+v1+","+v2+","+flow+","+cost+")";
+    }
   }
   public MinCostMaxFlow(int N) {
     n = N; s=n++;t=n++;
