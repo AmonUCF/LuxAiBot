@@ -13,6 +13,7 @@ public class Surveyor {
   final private GameMap gameMap;
 
   private static int[] dx = {-1, 0, 1, 0}, dy = {0, -1, 0, 1};
+  private static int[] diagX = {-1,1,1,-1}, diagY = {-1, -1, 1, 1};
 
   public Surveyor(GameState gameState) {
     this.gameState = gameState;
@@ -96,11 +97,51 @@ public class Surveyor {
 
   private double[][] applySmallCityIncentive(double[][] score) {
 
+    // TODO: Analyze this ratio and find a more appropriate value
+    double smallCityBuffRatio = 1.5;
+    player.cities.values().forEach(city->{
+      if(city.citytiles.size() == 1) {
+        city.citytiles.forEach(cityTile->{
+          for(int k=0;k<4;k++){
+            int xx = cityTile.pos.x + dx[k], yy = cityTile.pos.y+ dy[k];
+            if (xx < 0 || xx >= gameMap.width || yy < 0 || yy >= gameMap.height)
+              continue;
 
+            score[xx][yy] *= smallCityBuffRatio;
+          }
+        });
+      }
+    });
+
+    // Debuff squares that aren't connected to other city tiles but are very close.
+    double antiCityDebuffRatio = 0.4;
+    player.cities.values().forEach(city->{
+      city.citytiles.forEach(cityTile -> {
+        for(int j=0;j<4;j++){
+          int xx = cityTile.pos.x + diagX[j], yy = cityTile.pos.y+ diagY[j];
+          if (xx < 0 || xx >= gameMap.width || yy < 0 || yy >= gameMap.height)
+            continue;
+
+          boolean badTile = true;
+          for(int k=0;k<4;k++){
+            int xxx = xx + dx[k], yyy = yy+ dy[k];
+            if (xxx < 0 || xxx >= gameMap.width || yyy < 0 || yyy >= gameMap.height)
+              continue;
+            if (gameMap.getCell(xxx,yyy).hasCityTile() && gameMap.getCell(xxx,yyy).citytile.team == player.team) {
+              badTile = false;
+              break;
+            }
+          }
+          if (badTile) {
+            score[xx][yy] *= antiCityDebuffRatio;
+          }
+        }
+      });
+    });
     return score;
   }
 
-  private int[][] getCityTileDistanceMatrix() {
+  private int[][] getCityTileDistanceMatrix(boolean includeFullWorker) {
     int[][] dist = new int[gameMap.width][gameMap.height];
     for(int i=0;i<dist.length;i++) Arrays.fill(dist[i], Integer.MAX_VALUE/3);
 
@@ -113,6 +154,16 @@ public class Surveyor {
       });
     });
 
+    if(includeFullWorker) {
+      player.units.forEach(unit -> {
+        if (unit.getCargoSpaceLeft() == 0) {
+          dist[unit.pos.x][unit.pos.y] = 0;
+          q.add(unit.pos.x);
+          q.add(unit.pos.y);
+        }
+      });
+    }
+
     while(!q.isEmpty()) {
       int x = q.poll(), y = q.poll();
       for(int k=0;k<4;k++){
@@ -123,7 +174,7 @@ public class Surveyor {
           continue;
 
         // if this is an enemy tile, we can't move here
-        if (gameMap.getCell(xx,yy).hasCityTile() && gameMap.getCell(xx,yy).citytile.team != gameState.id)
+        if (gameMap.getCell(xx,yy).hasCityTile() && gameMap.getCell(xx,yy).citytile.team != player.team)
           continue;
 
         dist[xx][yy] = dist[x][y]+1;
@@ -137,7 +188,8 @@ public class Surveyor {
 
   private double[][] applyDistanceDebuff(double[][] score) {
 
-    int[][] dist = getCityTileDistanceMatrix();
+    // TODO: Including full worker here makes us significantly worse - Try again once proper routing has been done
+    int[][] dist = getCityTileDistanceMatrix(false);
 
     double diminishingFactor = .9;
     double[] dimPow = new double[2*gameMap.width+1];

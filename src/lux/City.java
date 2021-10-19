@@ -22,4 +22,14 @@ public class City {
   public double getLightUpkeep() {
     return this.lightUpKeep;
   }
+
+  public int hashCode() {
+    return cityid.hashCode();
+  }
+
+  @Override
+  public boolean equals(Object o) {
+    City city = (City) o;
+    return cityid.equals(city.cityid);
+  }
 }

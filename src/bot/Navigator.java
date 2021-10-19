@@ -3,10 +3,7 @@ package bot;
 import lux.*;
 
 import javax.swing.text.html.Option;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.HashSet;
-import java.util.Optional;
+import java.util.*;
 
 public class Navigator {
   final private String TAG = "Navigator";
@@ -25,7 +22,26 @@ public class Navigator {
     return y * gameMap.width + x;
   }
 
-  private Position convertIntToCoordinate(int pos) {return new Position(pos % gameMap.width, pos / gameMap.width);}
+  private Position convertIntToCoordinate(int pos) {
+    return new Position(pos % gameMap.width, pos / gameMap.width);
+  }
+
+  private int calculateFuelCostPerNight(City city) {
+
+    int cost = city.citytiles.stream().map(cityTile -> {
+      int adjCount = 0;
+      for (int k = 0; k < 4; k++) {
+        int xx = cityTile.pos.x + dx[k], yy = cityTile.pos.y + dy[k];
+        if (xx < 0 || xx >= gameMap.width || yy < 0 || yy >= gameMap.height)
+          continue;
+
+        if (gameMap.getCell(xx, yy).hasCityTile()) adjCount++;
+      }
+      return (23 - 5 * adjCount) * GameConstants.PARAMETERS.NIGHT_LENGTH;
+    }).reduce(0, Integer::sum);
+
+    return cost;
+  }
 
   private HashSet<Integer> cityTileLocationsForPlayer(Player p) {
     HashSet<Integer> locs = new HashSet<>();
@@ -35,6 +51,29 @@ public class Navigator {
       });
     });
     return locs;
+  }
+
+  private HashSet<Integer> newCityPathObstacles(ArrayList<Unit> ignoreUnits) {
+    Player player = gameState.players[gameState.id];
+    Player opponent = gameState.players[(gameState.id + 1) % 2];
+
+    HashSet<Integer> obstacles = cityTileLocationsForPlayer(player);
+    obstacles.addAll(cityTileLocationsForPlayer(opponent));
+
+    player.units.forEach(unit -> {
+      int posId = convertCoordinateToInt(unit.pos.x, unit.pos.y);
+      if (!ignoreUnits.contains(unit)) {
+        obstacles.add(posId);
+      }
+    });
+
+    opponent.units.forEach(unit -> {
+      if (!ignoreUnits.contains(unit)) {
+        obstacles.add(convertCoordinateToInt(unit.pos.x, unit.pos.y));
+      }
+    });
+
+    return obstacles;
   }
 
   private HashSet<Integer> currentObstacles(ArrayList<Unit> ignoreUnits) {
@@ -67,8 +106,9 @@ public class Navigator {
   private void generateFlowGraphForResourceRouting(ArrayList<Unit> units, ArrayList<Cell> resources, int timeLayers,
                                                    MinCostMaxFlow flow) {
 
+    Player player = gameState.players[gameState.id];
     HashSet<Integer> obstacles = currentObstacles(/*ignore these=*/units);
-    HashSet<Integer> goodCityTiles = cityTileLocationsForPlayer(gameState.players[gameState.id]);
+    HashSet<Integer> goodCityTiles = cityTileLocationsForPlayer(player);
 
     int cellCount = gameMap.width * gameMap.height;
     for (int t = 0; t < timeLayers; t++) {
@@ -80,13 +120,13 @@ public class Navigator {
           if (obstacles.contains(cellId))
             continue;
 
-          int selfCap = goodCityTiles.contains(cellId) ? Integer.MAX_VALUE/2 : 1;
+          int selfCap = goodCityTiles.contains(cellId) ? Integer.MAX_VALUE / 2 : 1;
           flow.add(offset + 2 * cellId, offset + 2 * cellId + 1, selfCap, 0);
 
           // Add a flow source if there is an available unit there
           if (t == 0) {
             final int X = x, Y = y;
-            Optional<Unit> unit = units.parallelStream().filter(u -> u.pos.x == X && u.pos.y == Y).findAny();
+            Optional<Unit> unit = units.stream().filter(u -> u.pos.x == X && u.pos.y == Y).findAny();
             if (unit.isPresent()) {
               MinCostMaxFlow.Edge e = flow.add(flow.s, 2 * cellId, 1, 0);
               e.setMetadata(unit.get().id);
@@ -105,8 +145,19 @@ public class Navigator {
               continue;
 
             int nextOffset = (t + 1) * cellCount * 2;
-            int nextPosition = (t == timeLayers-1) ? tmpId : 2 * tmpId;
+            int nextPosition = (t == timeLayers - 1) ? tmpId : 2 * tmpId;
+
             int cost = tmpId == cellId ? 0 : 1;
+
+            // Try to force unit off of city square if it doesn't need to be there
+            if (tmpId == cellId && gameMap.getCell(xx, yy).hasCityTile()) {
+              String cityid = gameMap.getCell(xx, yy).citytile.cityid;
+              Optional<City> city = player.cities.values().stream().filter(c -> c.cityid.equals(cityid)).findAny();
+
+              if (city.isPresent() && city.get().fuel >= calculateFuelCostPerNight(city.get())) {
+                cost = 3;
+              }
+            }
             flow.add(offset + 2 * cellId + 1, nextOffset + nextPosition, 1, cost);
           }
         }
@@ -124,18 +175,18 @@ public class Navigator {
 
         final int X = x, Y = y;
         Optional<Cell> closestResource = resources.stream().min((a, b) -> {
-          double d1 = a.pos.distanceTo(gameMap.getCell(X,Y).pos),
-                  d2 = b.pos.distanceTo(gameMap.getCell(X,Y).pos);
-          return Double.compare(d1,d2);
+          double d1 = a.pos.distanceTo(gameMap.getCell(X, Y).pos),
+                  d2 = b.pos.distanceTo(gameMap.getCell(X, Y).pos);
+          return Double.compare(d1, d2);
         });
         int closestDist = Integer.MAX_VALUE;
-        if(closestResource.isPresent()) {
-          closestDist = (int) closestResource.get().pos.distanceTo(gameMap.getCell(x,y).pos);
+        if (closestResource.isPresent()) {
+          closestDist = (int) closestResource.get().pos.distanceTo(gameMap.getCell(x, y).pos);
         }
 
-        int selfCap = goodCityTiles.contains(cellId) ? Integer.MAX_VALUE/2 : 1;
-        if(closestDist != Integer.MAX_VALUE)
-          flow.add(offset+cellId, flow.t, selfCap, Math.max(0, (closestDist-1)*50));
+        int selfCap = goodCityTiles.contains(cellId) ? Integer.MAX_VALUE / 2 : 1;
+        if (closestDist != Integer.MAX_VALUE)
+          flow.add(offset + cellId, flow.t, selfCap, Math.max(0, (closestDist - 1) * 50));
 
         for (int k = 0; k < 5; k++) {
           int xx = x + dx[k], yy = y + dy[k];
@@ -147,7 +198,7 @@ public class Navigator {
             continue;
 
           int cost = tmpId == cellId ? 0 : 1;
-          flow.add(offset + cellId, offset + tmpId, Integer.MAX_VALUE/2, cost);
+          flow.add(offset + cellId, offset + tmpId, Integer.MAX_VALUE / 2, cost);
         }
       }
     }
@@ -169,9 +220,9 @@ public class Navigator {
   private ArrayList<String> readFlowGraphForMoves(ArrayList<Unit> units, int timeLayers, MinCostMaxFlow flow) {
     ArrayList<String> actions = new ArrayList<>();
     int cellCount = gameMap.width * gameMap.height;
-    for(MinCostMaxFlow.Edge e : flow.adj[flow.s]) {
+    for (MinCostMaxFlow.Edge e : flow.adj[flow.s]) {
       if (e.flow > 0 && e.metadata != null) {
-        Unit unit = units.parallelStream().filter(u->u.id==e.metadata).findAny().get();
+        Unit unit = units.stream().filter(u -> u.id == e.metadata).findAny().get();
 
         int end = followPath(e.v2, flow);
         if (end == -1) {
@@ -207,6 +258,59 @@ public class Navigator {
     long[] results = flow.flow();
 
     return readFlowGraphForMoves(units, timeLayers, flow);
+  }
+
+  public String generatePathToNewCityTile(Unit unit, Position cityPosition) {
+
+    HashSet<Integer> obstacles = newCityPathObstacles(new ArrayList<>());
+
+    // store the id of the node we came from
+    int[][] path = new int[gameMap.width][gameMap.height];
+    for(int i=0;i<path.length;i++)Arrays.fill(path[i], -1);
+
+
+    ArrayDeque<Integer> q = new ArrayDeque<>();
+    q.add(unit.pos.x);
+    q.add(unit.pos.y);
+
+    boolean found = false;
+    while(!q.isEmpty()) {
+      int x = q.poll(), y = q.poll();
+
+      for(int k=0;k<4;k++){
+        int xx = x + dx[k], yy = y + dy[k];
+        if (xx < 0 || xx >= gameMap.width || yy < 0 || yy >= gameMap.height)
+          continue;
+        if (path[xx][yy] != -1)
+          continue;
+        if (obstacles.contains(convertCoordinateToInt(xx,yy)))
+          continue;
+
+        path[xx][yy] = convertCoordinateToInt(x,y);
+        q.add(xx);
+        q.add(yy);
+        if (xx == cityPosition.x && yy == cityPosition.y){
+          found = true;
+        }
+      }
+      if (found) break;
+    }
+
+    if (!found) {
+      System.err.println(TAG+": NO ROUTE TO NEW CITY!!! turn="+gameState.turn);
+
+      Direction dir = unit.pos.directionTo(cityPosition);
+      return unit.move(dir);
+    }
+
+    int x = cityPosition.x, y = cityPosition.y;
+    while(path[x][y] != convertCoordinateToInt(unit.pos.x, unit.pos.y)) {
+      Position prevPos = convertIntToCoordinate(path[x][y]);
+      x = prevPos.x;
+      y = prevPos.y;
+    }
+
+    return unit.move(unit.pos.directionTo(new Position(x,y)));
   }
 
 

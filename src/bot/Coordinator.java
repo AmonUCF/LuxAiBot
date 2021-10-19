@@ -44,7 +44,7 @@ public class Coordinator {
     for (Unit unit : colonizers.keySet()) {
       Position colonyPos = colonizers.get(unit);
 
-      if(gameMap.getCell(colonyPos.x, colonyPos.y).hasCityTile()){
+      if (gameMap.getCell(colonyPos.x, colonyPos.y).hasCityTile()) {
         removeSet.add(unit);
       }
     }
@@ -59,7 +59,7 @@ public class Coordinator {
   private ArrayList<String> generateAvailableUnitMovementActions(GameState gameState, ArrayList<Unit> availableUnits) {
     Navigator navigator = new Navigator(gameState);
     ArrayList<String> actions = navigator.generateRoutesToResources(availableUnits,
-            (ArrayList<Cell>) resourceTiles.parallelStream().filter(cell -> {
+            (ArrayList<Cell>) resourceTiles.stream().filter(cell -> {
               return cell.resource.type.equals(GameConstants.RESOURCE_TYPES.WOOD) ||
                       cell.resource.type.equals(GameConstants.RESOURCE_TYPES.COAL) && player.researchedCoal() ||
                       cell.resource.type.equals(GameConstants.RESOURCE_TYPES.URANIUM) && player.researchedUranium();
@@ -76,43 +76,40 @@ public class Coordinator {
       Surveyor surveyor = new Surveyor(gameState);
       Position newCity = surveyor.findPotentialCityLocation();
 
-      Optional<Unit> closestUnit = units.stream().min((a, b)->{
+      Optional<Unit> closestUnit = units.stream().min((a, b) -> {
         int d1 = (int) a.pos.distanceTo(newCity);
         int d2 = (int) b.pos.distanceTo(newCity);
-        return d1-d2;
+        return d1 - d2;
       });
 
-      System.err.println(TAG+": FOUND COLONIZER "+newCity.toString());
+      System.err.println(TAG + ": FOUND COLONIZER " + newCity.toString());
       colonizers.put(closestUnit.get(), newCity);
-    }
-
-    if(colonizers.size()>0){
-      System.err.println(TAG+": units= "+units+" "+colonizers.keySet());
     }
 
     for (Unit unit : units) {
       if (colonizers.containsKey(unit)) {
         Position colonyPosition = colonizers.get(unit);
-        Direction dir = unit.pos.directionTo(colonyPosition);
-        if (dir.equals(Direction.CENTER) && unit.canBuild(gameMap)) {
+        if (colonyPosition.equals(unit.pos)) {
           colonizers.remove(unit);
           actions.add(unit.buildCity());
-          System.err.println(TAG+": trying to build city tile -> "+colonyPosition.x+" "+colonyPosition.y);
+          System.err.println(TAG + ": trying to build city tile -> " + colonyPosition.x + " " + colonyPosition.y);
         } else {
-          System.err.println(TAG+": MOVING TOWARD GOAL "+dir.str);
-          actions.add(unit.move(dir));
+          Navigator navigator = new Navigator(gameState);
+          actions.add(navigator.generatePathToNewCityTile(unit, colonyPosition));
         }
+
         continue;
       }
       if (player.cities.size() > 0) {
-        City city = player.cities.values().iterator().next();
         double closestDist = 999999;
         CityTile closestCityTile = null;
-        for (CityTile citytile : city.citytiles) {
-          double dist = citytile.pos.distanceTo(unit.pos);
-          if (dist < closestDist) {
-            closestCityTile = citytile;
-            closestDist = dist;
+        for (City city : player.cities.values()) {
+          for (CityTile citytile : city.citytiles) {
+            double dist = citytile.pos.distanceTo(unit.pos);
+            if (dist < closestDist) {
+              closestCityTile = citytile;
+              closestDist = dist;
+            }
           }
         }
         if (closestCityTile != null) {
@@ -124,22 +121,55 @@ public class Coordinator {
     return actions;
   }
 
+  // TODO: Most of this logic should be moved to the Surveyor
   private ArrayList<String> generateCityActions(GameState gameState) {
     ArrayList<String> actions = new ArrayList<>();
 
-    // TODO: update logic to better choose which city worker should be built
-    player.cities.values().forEach(city -> {
-      city.citytiles.forEach(cityTile -> {
-        if(cityTile.canAct()) {
-          if(player.cityTileCount > player.units.size()){
-            System.err.println("trying to build worker -> "+player.cityTileCount+" "+player.units.size());
-            actions.add(cityTile.buildWorker());
-          } else {
-            actions.add(cityTile.research());
-          }
+    /**
+     * Calculate a score based on how close resources are to the given city. Cities without many resources nearby are
+     * bad places to spawn a worker.
+     **/
+    HashMap<City, Double> cityScore = new HashMap<>();
+    for (City city : player.cities.values()) {
+      double score = 0;
+      for (Cell resource : resourceTiles) {
+        int minDist = Integer.MAX_VALUE;
+        for (CityTile tile : city.citytiles) {
+          minDist = Math.min(minDist, (int) tile.pos.distanceTo(resource.pos));
         }
-      });
+
+        // calculates potential fuel available from the current resource
+        int fuel = resource.resource.amount;
+        if(resource.resource.type.equals(GameConstants.RESOURCE_TYPES.COAL) && player.researchedCoal())
+          fuel *= GameConstants.PARAMETERS.RESOURCE_TO_FUEL_RATE.COAL;
+        if (resource.resource.type.equals(GameConstants.RESOURCE_TYPES.URANIUM) && player.researchedUranium())
+          fuel *= GameConstants.PARAMETERS.RESOURCE_TO_FUEL_RATE.URANIUM;
+
+        // Reduce potential fuel-gain based on distance
+        score += fuel * Math.pow(.9, minDist);
+      }
+
+      cityScore.put(city, score);
+    }
+    ArrayList<City> cities = new ArrayList<>();
+    cities.addAll(player.cities.values());
+    Collections.sort(cities, (a, b) -> {
+      return Double.compare(cityScore.get(a), cityScore.get(b));
     });
+
+    int workersMade = 0;
+    for (City city : cities) {
+      for (CityTile tile : city.citytiles) {
+        if (!tile.canAct()) continue;
+        if (player.cityTileCount + workersMade > player.units.size()) {
+          System.err.println("trying to build worker -> " + player.cityTileCount + " " + player.units.size());
+          actions.add(tile.buildWorker());
+          workersMade++;
+        } else {
+          actions.add(tile.research());
+        }
+      }
+    }
 
     return actions;
   }
