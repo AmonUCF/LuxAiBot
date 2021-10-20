@@ -29,6 +29,9 @@ public class Unit {
       return GameConstants.PARAMETERS.RESOURCE_CAPACITY.CART - spaceused;
     }
   }
+  public int getCargoSpaceUsed() {
+    return this.cargo.wood + this.cargo.coal + this.cargo.uranium;
+  }
   public boolean canBuild(GameMap gameMap) {
     Cell cell = gameMap.getCellByPos(this.pos);
     if (!cell.hasResource() && this.canAct() && (this.cargo.wood + this.cargo.coal + this.cargo.uranium) >= GameConstants.PARAMETERS.CITY_BUILD_COST) return true;

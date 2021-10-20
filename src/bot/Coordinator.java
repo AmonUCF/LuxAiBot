@@ -167,7 +167,7 @@ public class Coordinator {
           }
         }
         for(int time = gameState.turn; time < gameState.turn+4; time++) {
-          isLight = isLight && time % 40 < 30;
+          isLight = isLight && (time-1) % 40 < 30;
         }
         okTimeToPlace |= isLight;
         if (okTimeToPlace) {
@@ -229,11 +229,58 @@ public class Coordinator {
     actions.addAll(leftoverUnitMovements);
 
     actions = RemoveDuplicateMoveActions(actions);
+    actions = RemoveSuicidalMoveActions(gameState, actions);
 
     actions.addAll(buildCityActions);
 
     actions.addAll(cityActions);
     return actions;
+  }
+
+  private ArrayList<String> RemoveSuicidalMoveActions(GameState gameState, ArrayList<String> actions) {
+    boolean isNight = (gameState.turn-1) % 40 >= 30;
+    if (!isNight) return actions;
+
+    ArrayList<String> newActions = new ArrayList<>();
+    for (String action : actions) {
+      if (!action.startsWith("m u_"))
+        continue;
+      String id = action.trim().split(" ")[1];
+      Direction dir = Direction.getDir(action.trim().split(" ")[2]);
+      Optional<Unit> oUnit = player.units.stream().filter(u -> u.id.equals(id)).findAny();
+      if (!oUnit.isPresent())
+        continue;
+      Unit unit = oUnit.get();
+      if (unit.getCargoSpaceUsed() > 0) {
+        newActions.add(action);
+        continue;
+      }
+
+      Cell newCell = gameMap.getCellByPos(unit.pos.translate(dir, 1));
+      if (newCell == null) {
+        newActions.add(action);
+        continue;
+      }
+
+      if (newCell.hasCityTile()) {
+        newActions.add(action);
+        continue;
+      }
+
+      boolean hasResourceNear = false;
+      for (char c : "nsewc".toCharArray()) {
+        Cell near = gameMap.getCellByPos(newCell.pos.translate(Direction.getDir(c+""), 1));
+        if (near != null && near.hasResource()){
+          hasResourceNear = true;
+        }
+      }
+
+      if (hasResourceNear) {
+        newActions.add(action);
+        continue;
+      }
+    }
+    return newActions;
   }
 
   private ArrayList<Unit> findLeftoverUnits(ArrayList<String> actions) {
