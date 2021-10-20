@@ -2,7 +2,6 @@ package bot;
 
 import lux.*;
 
-import javax.swing.text.html.Option;
 import java.util.*;
 
 public class Navigator {
@@ -17,7 +16,7 @@ public class Navigator {
 
   private MinCostMaxFlow flow;
 
-  private static int[] dx = {-1, 0, 1, 0, 0}, dy = {0, -1, 0, 1, 0};
+  private final static int[] dx = {-1, 0, 1, 0, 0}, dy = {0, -1, 0, 1, 0};
 
   public Navigator(GameState gameState) {
     this.gameState = gameState;
@@ -68,8 +67,7 @@ public class Navigator {
   private HashSet<Integer> currentObstacles(ArrayList<Unit> ignoreUnits) {
     Player opponent = gameState.players[(gameState.id + 1) % 2];
 
-    HashSet<Integer> goodCityTiles = cityTileLocationsForPlayer(player),
-            badCityTiles = cityTileLocationsForPlayer(opponent);
+    HashSet<Integer> badCityTiles = cityTileLocationsForPlayer(opponent);
 
     HashSet<Integer> obstacles = new HashSet<>();
 

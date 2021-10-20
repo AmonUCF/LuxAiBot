@@ -2,25 +2,22 @@ package bot;
 
 import lux.*;
 
-import java.sql.Array;
 import java.util.*;
-import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
 public class Coordinator {
 
   final private String TAG = "Coordinator";
 
-  private Player player, opponent;
+  private Player player;
   private GameMap gameMap;
 
   private HashSet<Unit> colonizers = new HashSet<>();
 
   private ArrayList<Cell> resourceTiles;
 
-  private static int[] dr = {-1, 0, 1, 0}, dc = {0, -1, 0, 1};
-
-  public Coordinator() {}
+  public Coordinator() {
+  }
 
   /**
    * Grabs all tiles which are resource squares and stores them in class var
@@ -38,18 +35,16 @@ public class Coordinator {
   }
 
   private ArrayList<String> generateAvailableUnitMovementActions(Navigator navigator, ArrayList<Unit> availableUnits) {
-    ArrayList<String> actions = navigator.generateRoutesToResources(availableUnits,
-        (ArrayList<Cell>) resourceTiles.stream().filter(cell -> {
-          return cell.resource.type.equals(GameConstants.RESOURCE_TYPES.WOOD) ||
-              cell.resource.type.equals(GameConstants.RESOURCE_TYPES.COAL) && player.researchedCoal() ||
-              cell.resource.type.equals(GameConstants.RESOURCE_TYPES.URANIUM) && player.researchedUranium();
-        }).collect(Collectors.toList()));
-
-    return actions;
+    return navigator.generateRoutesToResources(availableUnits,
+        (ArrayList<Cell>) resourceTiles.stream().filter(cell ->
+            cell.resource.type.equals(GameConstants.RESOURCE_TYPES.WOOD) ||
+                cell.resource.type.equals(GameConstants.RESOURCE_TYPES.COAL) && player.researchedCoal() ||
+                cell.resource.type.equals(GameConstants.RESOURCE_TYPES.URANIUM) && player.researchedUranium()
+        ).collect(Collectors.toList()));
   }
 
   // TODO: Most of this logic should be moved to the Surveyor
-  private ArrayList<String> generateCityActions(GameState gameState) {
+  private ArrayList<String> generateCityActions() {
     ArrayList<String> actions = new ArrayList<>();
 
     /**
@@ -78,11 +73,10 @@ public class Coordinator {
 
       cityScore.put(city, score);
     }
-    ArrayList<City> cities = new ArrayList<>();
-    cities.addAll(player.cities.values());
-    Collections.sort(cities, (a, b) -> {
-      return -Double.compare(cityScore.get(a), cityScore.get(b));
-    });
+    ArrayList<City> cities = new ArrayList<>(player.cities.values());
+    Collections.sort(cities, (a, b) ->
+        -Double.compare(cityScore.get(a), cityScore.get(b))
+    );
 
     int workersMade = 0;
     for (City city : cities) {
@@ -106,7 +100,6 @@ public class Coordinator {
 
     // store some important game state variables
     player = gameState.players[gameState.id];
-    opponent = gameState.players[(gameState.id + 1) % 2];
     gameMap = gameState.map;
 
     // get the resource tiles
@@ -131,13 +124,12 @@ public class Coordinator {
     ArrayList<Unit> refuelUnits =
         (ArrayList<Unit>) player.units
             .stream()
-            .filter(unit -> {
-              return
-                  !colonizers.contains(unit) &&
-                  (unit.getCargoSpaceLeft() == 0 ||
-                      unit.cargo.uranium >= minUraniumForRefuel ||
-                      unit.cargo.coal >= minCoalForRefuel);
-            })
+            .filter(unit ->
+                !colonizers.contains(unit) &&
+                    (unit.getCargoSpaceLeft() == 0 ||
+                        unit.cargo.uranium >= minUraniumForRefuel ||
+                        unit.cargo.coal >= minCoalForRefuel)
+            )
             .collect(Collectors.toList());
 
     Navigator towardResourceNavigator = new Navigator(gameState);
@@ -152,9 +144,9 @@ public class Coordinator {
         towardResourceNavigator);
 
     /** Get all full units which weren't assigned a city **/
-    ArrayList<Unit> possibleColonizers = (ArrayList<Unit>) fullUnits.stream().filter(unit -> {
-      return !assignments.containsKey(unit);
-    }).collect(Collectors.toList());
+    ArrayList<Unit> possibleColonizers = (ArrayList<Unit>) fullUnits.stream().filter(unit ->
+        !assignments.containsKey(unit)
+    ).collect(Collectors.toList());
 
     ArrayList<Position> candidateCities = surveyor.findKPotentialCityLocations(Math.min(possibleColonizers.size(), 5));
 
@@ -188,21 +180,19 @@ public class Coordinator {
      * something. Could very well cause unstable setups where we let cities go hungry in lieu of building a new one,
      * only to have the new city starve while building the next.
      */
-    if(!colonizerActions.isEmpty() || !colonizers.isEmpty()) {
-      System.err.println(TAG+" "+gameState.turn+": Colonizers: "+colonizers+" "+colonizerActions.size()+"\nNew " +
-          "Cities: "+candidateCities);
+    if (!colonizerActions.isEmpty() || !colonizers.isEmpty()) {
+      System.err.println(TAG + " " + gameState.turn + ": Colonizers: " + colonizers + " " + colonizerActions.size() + "\nNew " +
+          "Cities: " + candidateCities);
     }
 
     HashSet<Unit> newColonizers = new HashSet<>();
     for (String unitAction : colonizerActions) {
       String id = unitAction.trim().split(" ")[1];
-      Optional<Unit> pUnit = possibleColonizers.stream().filter(unit->unit.id.equals(id)).findAny();
-      if (pUnit.isPresent()){
-        newColonizers.add(pUnit.get());
-      }
+      Optional<Unit> pUnit = possibleColonizers.stream().filter(unit -> unit.id.equals(id)).findAny();
+      pUnit.ifPresent(newColonizers::add);
     }
 
-    for(Unit unit : colonizers) {
+    for (Unit unit : colonizers) {
       if (!unit.canAct() || unit.getCargoSpaceLeft() != 0) {
         newColonizers.add(unit);
       }
@@ -210,9 +200,9 @@ public class Coordinator {
 
     colonizers = newColonizers;
 
-    ArrayList<String> cityActions = generateCityActions(gameState);
+    ArrayList<String> cityActions = generateCityActions();
 
-    // you can add debug annotations using the static methods of the Annotate class.
+    // you can add debug annotations using the static methods of the 'Annotate' class.
     // actions.add(Annotate.circle(0, 0));
 
     /** AI Code Goes Above! **/
@@ -232,15 +222,13 @@ public class Coordinator {
 
   private ArrayList<Unit> findLeftoverUnits(ArrayList<String> actions) {
     HashSet<String> unitIds = new HashSet<>();
-    actions.stream().forEach(action->{
+    actions.stream().forEach(action -> {
       String id = action.trim().split(" ")[1];
       unitIds.add(id);
     });
-    ArrayList<Unit> units = (ArrayList<Unit>) player.units.stream().filter(unit -> {
-      return unit.canAct() && !unitIds.contains(unit.id);
-    }).collect(Collectors.toList());
-
-    return units;
+    return (ArrayList<Unit>) player.units.stream().filter(unit ->
+        unit.canAct() && !unitIds.contains(unit.id)).collect(Collectors.toList()
+    );
   }
 
   private ArrayList<String> RemoveDuplicateMoveActions(ArrayList<String> actions) {
