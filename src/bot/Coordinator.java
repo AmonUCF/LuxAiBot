@@ -156,8 +156,24 @@ public class Coordinator {
       Optional<Unit> reachedGoal =
           possibleColonizers.stream().filter(unit -> p.x == unit.pos.x && p.y == unit.pos.y).findAny();
       if (reachedGoal.isPresent() && reachedGoal.get().canAct()) {
-        possibleColonizers.remove(reachedGoal.get());
-        buildCityActions.add(reachedGoal.get().buildCity());
+
+        // Check that we are either near a resource, or it won't be dark in the next 0-3 days
+        boolean okTimeToPlace = false, isLight = true;
+        for(char c : "nsew".toCharArray()) {
+          Cell adj = gameMap.getCellByPos(p.translate(Direction.getDir(c+""), 1));
+          // TODO: should make sure we've researched this resource
+          if (adj!=null && (adj.hasResource() || (adj.hasCityTile() && adj.citytile.team == player.team))) {
+            okTimeToPlace = true;
+          }
+        }
+        for(int time = gameState.turn; time < gameState.turn+4; time++) {
+          isLight = isLight && time % 40 < 30;
+        }
+        okTimeToPlace |= isLight;
+        if (okTimeToPlace) {
+          possibleColonizers.remove(reachedGoal.get());
+          buildCityActions.add(reachedGoal.get().buildCity());
+        }
       }
     }
 

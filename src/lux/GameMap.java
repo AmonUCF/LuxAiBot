@@ -4,6 +4,7 @@ public class GameMap {
   public int width;
   public int height;
   public Cell[][] map;
+
   public GameMap(int width, int height) {
     this.width = width;
     this.height = height;
@@ -14,13 +15,20 @@ public class GameMap {
       }
     }
   }
+
   public Cell getCellByPos(Position pos) {
+    if (pos.x < 0 || pos.x >= this.width || pos.y < 0 || pos.y >= this.height)
+      return null;
     return this.map[pos.y][pos.x];
   }
+
   public Cell getCell(int x, int y) {
     return this.map[y][x];
   }
-  /** Internal use only */
+
+  /**
+   * Internal use only
+   */
   public void _setResource(String rType, int x, int y, int amount) {
     Cell cell = this.getCell(x, y);
     cell.resource = new Resource(rType, amount);
