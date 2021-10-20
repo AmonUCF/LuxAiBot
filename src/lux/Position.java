@@ -17,10 +17,6 @@ public class Position {
     return true;
   }
 
-  public boolean equals(Position pos) {
-    return this.x == pos.x && this.y == pos.y;
-  }
-
   public Position translate(Direction direction, int units) {
     switch (direction) {
       case NORTH:
@@ -55,6 +51,17 @@ public class Position {
       }
     }
     return closestDirection;
+  }
+
+  @Override
+  public int hashCode() {
+    return x * 1000000+y;
+  }
+
+  @Override
+  public boolean equals(Object o) {
+    Position p = (Position)o;
+    return x==p.x && y==p.y;
   }
 
   @Override

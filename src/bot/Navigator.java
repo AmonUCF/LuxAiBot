@@ -13,7 +13,7 @@ public class Navigator {
   final private GameMap gameMap;
 
   // 5 time layers plus 1 untimed layer
-  private final int timeLayers = 5;
+  private final int timeLayers = 8;
 
   private MinCostMaxFlow flow;
 
@@ -75,13 +75,6 @@ public class Navigator {
 
     obstacles.addAll(badCityTiles);
 
-    player.units.forEach(unit -> {
-      int posId = convertCoordinateToInt(unit.pos.x, unit.pos.y);
-      if (!ignoreUnits.contains(unit) && !goodCityTiles.contains(posId)) {
-        obstacles.add(posId);
-      }
-    });
-
     opponent.units.forEach(unit -> {
       if (!ignoreUnits.contains(unit)) {
         obstacles.add(convertCoordinateToInt(unit.pos.x, unit.pos.y));
@@ -140,7 +133,10 @@ public class Navigator {
               Optional<City> city = player.cities.values().stream().filter(c -> c.cityid.equals(cityid)).findAny();
 
               if (city.isPresent() && city.get().fuel >= city.get().getLightUpkeep() * GameConstants.PARAMETERS.NIGHT_LENGTH) {
-                cost = 3;
+                cost = 2;
+              }
+              if (player.cities.values().size() == 1 && city.isPresent() && city.get().citytiles.size() == 1) {
+                cost = 100;
               }
             }
             flow.add(offset + 2 * cellId + 1, nextOffset + nextPosition, 1, cost);
@@ -225,7 +221,8 @@ public class Navigator {
         Position destination = convertIntToCoordinate(node);
         Direction dir = unit.pos.directionTo(destination);
 
-        actions.add(unit.move(dir));
+        if(unit.canAct())
+          actions.add(unit.move(dir));
       }
     }
 
@@ -308,7 +305,8 @@ public class Navigator {
     return taken;
   }
 
-  private void SetupGraph(boolean canMoveInCity, HashSet<Integer> obstacles, MinCostMaxFlow oldFlow) {
+  private void SetupGraph(boolean canMoveInCity, HashSet<String> allowedCityTiles, HashSet<Integer> obstacles,
+                          MinCostMaxFlow oldFlow) {
 
     int cellCount = gameMap.width * gameMap.height;
     flow = new MinCostMaxFlow(cellCount * timeLayers * 2 + cellCount);
@@ -325,8 +323,7 @@ public class Navigator {
 
           int selfCap = goodCityTiles.contains(cellId) ? Integer.MAX_VALUE / 2 : 1;
 
-          // TODO: Investigate why 't!=0' is required -> likely causing bug
-          if (t != 0 && checkIfTimedLocationIsTaken(t, x, y, oldFlow) && !gameMap.getCell(x,y).hasCityTile()) {
+          if (checkIfTimedLocationIsTaken(t, x, y, oldFlow) && !gameMap.getCell(x,y).hasCityTile()) {
             selfCap = 0;
           }
           flow.add(offset + 2 * cellId, offset + 2 * cellId + 1, selfCap, 0);
@@ -335,7 +332,8 @@ public class Navigator {
           // Add an edge if it's a valid square and not an obstacle
           for (int k = 0; k < 5; k++) {
             if (gameMap.getCell(x,y).hasCityTile() && !canMoveInCity && k != 4){
-              continue;
+              if (!allowedCityTiles.contains(gameMap.getCell(x,y).citytile.cityid))
+                continue;
             }
             int xx = x + dx[k], yy = y + dy[k];
             if (xx < 0 || xx >= gameMap.width || yy < 0 || yy >= gameMap.height)
@@ -418,6 +416,23 @@ public class Navigator {
     }
   }
 
+  private void applySourceAndSinkForLeftoverRouting(ArrayList<Unit> units) {
+    // apply source to unit locations
+    for (Unit unit : units) {
+      int idx = 2 * convertCoordinateToInt(unit.pos.x, unit.pos.y);
+      MinCostMaxFlow.Edge e = flow.add(flow.s, idx, 1, 0);
+      e.setMetadata(unit.id);
+    }
+
+    // apply sink to all city tiles
+    int offset = timeLayers * gameMap.width * gameMap.height * 2;
+    for(City c : player.cities.values()) {
+      for (CityTile tile : c.citytiles) {
+        flow.add(offset+convertCoordinateToInt(tile.pos.x,tile.pos.y), flow.t, 1, 0);
+      }
+    }
+  }
+
   public ArrayList<String> generateRoutesToCities(HashMap<Unit, String> assignments, Navigator oldNav) {
 
     HashSet<String> cities = new HashSet<>();
@@ -433,7 +448,9 @@ public class Navigator {
       }
 
       Navigator tmpNav = new Navigator(gameState);
-      tmpNav.SetupGraph(false, new HashSet<>(), oldFlow);
+      HashSet<String> allowedCity = new HashSet<>();
+      allowedCity.add(cityId);
+      tmpNav.SetupGraph(false, allowedCity, new HashSet<>(), oldFlow);
       tmpNav.applySourceAndSinkForCityRouting(cityId, assignedUnits);
       long[] results = tmpNav.flow.flow();
 
@@ -450,11 +467,26 @@ public class Navigator {
 
   public ArrayList<String> generateRoutesToColonies(ArrayList<Unit> units, ArrayList<Position> cities,
                                                     Navigator oldNavigator) {
-    SetupGraph(false, new HashSet<>(), oldNavigator.flow);
+    SetupGraph(false, new HashSet<>(), new HashSet<>(), oldNavigator.flow);
     applySourceAndSinkForColonyRouting(units, cities);
 
     long[] results = flow.flow();
 
     return readFlowGraphForMoves(units);
+  }
+
+  /**
+   * This shit is super tough, because you don't really have a good way to know if the leftover units should take
+   * their stuff to a city, or just collect more resources.
+   * I will try to direct units toward city tiles. The downside to this is that we will likely lose coal based
+   * settlers with this mechanism.
+   */
+  public ArrayList<String> generateRoutesForLeftovers(ArrayList<Unit> leftovers, Navigator oldNav) {
+    SetupGraph(true, new HashSet<>(), new HashSet<>(), oldNav.flow);
+    applySourceAndSinkForLeftoverRouting(leftovers);
+
+    long[] results = flow.flow();
+
+    return readFlowGraphForMoves(leftovers);
   }
 }

@@ -229,15 +229,15 @@ public class Surveyor {
     applySmallCityIncentive(score);
     removeInvalidLocations(score);
 
-    TreeSet<Position> best = new TreeSet<>((a,b)-> {
-      return -Double.compare(score[a.x][a.y],score[b.x][b.y]);
+    TreeSet<Position> best = new TreeSet<>((a, b) -> {
+      return -Double.compare(score[a.x][a.y], score[b.x][b.y]);
     });
 
     for (int x = 0; x < gameMap.width; x++) {
       for (int y = 0; y < gameMap.height; y++) {
-        if (best.size() < K) best.add(new Position(x,y));
+        if (best.size() < K) best.add(new Position(x, y));
         else {
-          best.add(new Position(x,y));
+          best.add(new Position(x, y));
           best.remove(best.last());
         }
       }
@@ -256,12 +256,16 @@ public class Surveyor {
 
   // Calculates the cost of supply for the next 20 night turns
   private int estimatedNecessaryFuel(City city) {
+    // Forces player to expand to two tiles quickly
+    if (player.cities.values().size() == 1 && city.citytiles.size() == 1) {
+      return 0;
+    }
     int upkeep = (int) city.getLightUpkeep();
     int cycleLength = GameConstants.PARAMETERS.DAY_LENGTH + GameConstants.PARAMETERS.NIGHT_LENGTH;
     int turnsLeft = GameConstants.PARAMETERS.MAX_DAYS - gameState.turn;
     int nightTurnsLeft = (turnsLeft / cycleLength * GameConstants.PARAMETERS.NIGHT_LENGTH) +
             Math.min(GameConstants.PARAMETERS.NIGHT_LENGTH, turnsLeft % cycleLength);
-    return upkeep * Math.min(nightTurnsLeft, 20);
+    return upkeep * Math.min(nightTurnsLeft, 10);
   }
 
   private static class UnitCityAssignment implements Comparable<UnitCityAssignment> {
@@ -416,12 +420,41 @@ public class Surveyor {
         break;
     }
 
+//    // Go ahead and send uranium to cities
+//    HashMap<City, Integer> extraFuel = new HashMap<>();
+//    for (Unit u : fullUnits) {
+//      if (assignments.containsKey(u)) continue;
+//      if (u.cargo.uranium == 0) continue;
+//
+//      double leastTurns = 100000;
+//      City best = null;
+//      for (City c : player.cities.values()) {
+//        int extra = (extraFuel.containsKey(c)) ? extraFuel.get(c) : 0;
+//        double turnsTilDead = (c.fuel + extra) / c.getLightUpkeep();
+//        if (turnsTilDead < leastTurns) {
+//          leastTurns = turnsTilDead;
+//          best = c;
+//        }
+//      }
+//
+//      if (best != null) {
+//        if (extraFuel.containsKey(best)) {
+//          extraFuel.put(best,
+//                  extraFuel.get(best) + u.cargo.uranium * GameConstants.PARAMETERS.RESOURCE_TO_FUEL_RATE.URANIUM);
+//        } else {
+//          extraFuel.put(best, u.cargo.uranium * GameConstants.PARAMETERS.RESOURCE_TO_FUEL_RATE.URANIUM);
+//        }
+//        System.err.println(TAG+": ASSIGNING URANIUM WORKER="+u.id +" to city="+best.cityid);
+//        assignments.put(u, best.cityid);
+//      }
+//    }
+
     String ass = "";
     for (Unit u : assignments.keySet())
       ass += "(" + u + "," + assignments.get(u) + ")";
 
     if (ass.length() != 0) {
-      System.err.println(TAG + ": ASSIGNMENTS=" + ass);
+      System.err.println(TAG + " "+gameState.turn+": ASSIGNMENTS=" + ass);
     }
 
     return assignments;
