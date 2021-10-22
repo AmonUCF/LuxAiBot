@@ -24,28 +24,215 @@ public class Surveyor {
 
   /**
    * TODO: Probably going to need to optimize these values at a later date.
+   * Calculates fuel per turn
    **/
   private double resourceTypeValue(String resourceType) {
     switch (resourceType) {
       case GameConstants.RESOURCE_TYPES.WOOD:
         return GameConstants.PARAMETERS.WORKER_COLLECTION_RATE.WOOD *
-                GameConstants.PARAMETERS.RESOURCE_TO_FUEL_RATE.WOOD;
+            GameConstants.PARAMETERS.RESOURCE_TO_FUEL_RATE.WOOD;
       case GameConstants.RESOURCE_TYPES.COAL:
         return GameConstants.PARAMETERS.WORKER_COLLECTION_RATE.COAL *
-                GameConstants.PARAMETERS.RESOURCE_TO_FUEL_RATE.COAL;
+            GameConstants.PARAMETERS.RESOURCE_TO_FUEL_RATE.COAL;
       case GameConstants.RESOURCE_TYPES.URANIUM:
         return GameConstants.PARAMETERS.WORKER_COLLECTION_RATE.URANIUM *
-                GameConstants.PARAMETERS.RESOURCE_TO_FUEL_RATE.URANIUM;
+            GameConstants.PARAMETERS.RESOURCE_TO_FUEL_RATE.URANIUM;
       default:
         return 0;
     }
   }
 
-  // TODO: This is currently BoardSize^2, but could be optimized to BoardSize * ResourceTileCount
-  private double[][] generateRawScoreMatrix() {
+
+  private double researchLevelBasedResourceValue(String resourceType) {
+    // if we research every turn, then it would be divided by a factor of 10, but let's be more conservative.
+    double researchPerTurn = player.cityTileCount / 12.0;
+    double turnsToCoal =
+        (GameConstants.PARAMETERS.RESEARCH_REQUIREMENTS.COAL - player.researchPoints) / researchPerTurn;
+    double turnsToUranium =
+        (GameConstants.PARAMETERS.RESEARCH_REQUIREMENTS.URANIUM - player.researchPoints) / researchPerTurn;
+    double maxDaysAway = 50;
+    switch (resourceType) {
+      case GameConstants.RESOURCE_TYPES.WOOD:
+        return 10;
+      case GameConstants.RESOURCE_TYPES.COAL:
+        return 6 * Math.pow(Math.max(maxDaysAway - turnsToCoal, 0) / maxDaysAway, 2);
+      case GameConstants.RESOURCE_TYPES.URANIUM:
+      default:
+        return 4 * Math.pow(Math.max(maxDaysAway - turnsToUranium, 0) / maxDaysAway, 2);
+    }
+  }
+
+  public void drawBetterScore() {
+    double[][] score = generateBetterScoreMatrix();
+    removeInvalidLocations(score);
+    drawGrid(score);
+
+    applyDistanceDebuff(score, .7);
+    drawGrid(score);
+  }
+
+  private double[][] generateBetterScoreMatrix() {
     double[][] score = new double[gameMap.width][gameMap.height];
 
-    double diminishingFactor = 0.75;
+    /*
+    Go through all the resource cells in the grid and associate "clumps" into one group. A clump is a group of
+    resources of the same type that can all reach each other without having to leave the set. Also calculate total
+    sum score for the clump.
+     */
+    int[][] clump = new int[gameMap.width][gameMap.height];
+    HashMap<Integer, Double> clumpValue = new HashMap<>();
+    int clumpIdx = 1;
+    for (int x = 0; x < gameMap.width; x++) {
+      for (int y = 0; y < gameMap.height; y++) {
+        Cell cell = gameMap.getCell(x, y);
+        if (!cell.hasResource())continue;
+        if (clump[x][y] != 0)continue;
+
+        double clumpScore = 0;
+        clump[x][y] = clumpIdx;
+        ArrayDeque<Integer> q = new ArrayDeque<>();
+        q.add(x);
+        q.add(y);
+        Resource resource = gameMap.getCell(x,y).resource;
+        while(!q.isEmpty()) {
+          int xx = q.poll();
+          int yy = q.poll();
+          clumpScore += researchLevelBasedResourceValue(resource.type) * gameMap.getCell(xx,yy).resource.amount;
+          for (int k = 0; k < 4; k++) {
+            int xxx = xx + dx[k], yyy = yy + dy[k];
+            if (xxx < 0 || xxx >= gameMap.width || yyy < 0 || yyy >= gameMap.height)
+              continue;
+            if (clump[xxx][yyy] != 0) continue;
+            if (!gameMap.getCell(xxx,yyy).hasResource()) continue;
+            if (!gameMap.getCell(xxx,yyy).resource.type.equals(resource.type)) continue;
+
+            clump[xxx][yyy] = clumpIdx;
+            q.add(xxx);
+            q.add(yyy);
+          }
+        }
+        clumpValue.put(clumpIdx, clumpScore);
+        clumpIdx++;
+      }
+    }
+
+    for (int x = 0; x < gameMap.width; x++) {
+      for (int y = 0; y < gameMap.height; y++) {
+        Cell cell = gameMap.getCell(x, y);
+        if (cell.hasResource())
+          continue;
+        HashSet<Integer> closeClumps = new HashSet<>();
+        for (int k = 0; k < 4; k++) {
+          int xx = x + dx[k], yy = y + dy[k];
+          if (xx < 0 || xx >= gameMap.width || yy < 0 || yy >= gameMap.height)
+            continue;
+          if (clump[xx][yy] == 0) continue;
+          closeClumps.add(clump[xx][yy]);
+        }
+        for (int i : closeClumps) {
+          score[x][y] += clumpValue.get(i);
+        }
+      }
+    }
+
+    double[][] tmp = new double[gameMap.width][gameMap.height];
+    for (int x = 0; x < gameMap.width; x++) {
+      for (int y = 0; y < gameMap.height; y++) {
+        Cell cell = gameMap.getCell(x, y);
+        if (cell.hasResource())
+          continue;
+        if (score[x][y] != 0)
+          continue;
+
+        boolean nextToCity = false;
+        int closeCount = 0;
+        for (int k = 0; k < 4; k++) {
+          int xx = x + dx[k], yy = y + dy[k];
+          if (xx < 0 || xx >= gameMap.width || yy < 0 || yy >= gameMap.height)
+            continue;
+          if (gameMap.getCell(xx,yy).hasCityTile() && gameMap.getCell(xx,yy).citytile.team == player.team)
+            nextToCity = true;
+          if (score[xx][yy] != 0) {
+            tmp[x][y] += score[xx][yy];
+            closeCount++;
+          }
+        }
+        if (!nextToCity)
+          tmp[x][y] *= 0;
+        if (closeCount > 0)
+          tmp[x][y] /= closeCount;
+        tmp[x][y] *= .95;
+      }
+    }
+
+    for (int x = 0; x < gameMap.width; x++)
+      for (int y = 0; y < gameMap.height; y++)
+        score[x][y] += tmp[x][y];
+
+    return score;
+  }
+
+  // Generate (growth + explore) number of city locations where `growth` of them will be expanding close to nearby
+  // settlements and `explore` of them will be in further away locations.
+  public ArrayList<Position> findPotentialCityLocations(int growth, int explore) {
+    HashSet<Position> potentialLocs = new HashSet<>();
+
+    final double[][] score = generateBetterScoreMatrix();
+    removeInvalidLocations(score);
+    applyDistanceDebuff(score, 0.7);
+
+    final double[][] scoreCopy = new double[score.length][score[0].length];
+    for(int i=0;i<score.length;i++)for(int j=0;j<score[0].length;j++)scoreCopy[i][j] = score[i][j];
+    applyDistanceDebuff(scoreCopy, .95);
+    int[][] dist = getCityTileDistanceMatrix(false);
+    for (int x = 0; x < gameMap.width; x++) {
+      for (int y = 0; y < gameMap.height; y++) {
+        if(dist[x][y] <= 5)
+          scoreCopy[x][y] = 0;
+      }
+    }
+
+    TreeSet<Position> best = new TreeSet<>((a, b) -> {
+      return -Double.compare(scoreCopy[a.x][a.y], scoreCopy[b.x][b.y]);
+    });
+
+    for (int x = 0; x < gameMap.width; x++) {
+      for (int y = 0; y < gameMap.height; y++) {
+        if (best.size() < explore) best.add(new Position(x, y));
+        else {
+          best.add(new Position(x, y));
+          best.remove(best.last());
+        }
+      }
+    }
+
+    potentialLocs.addAll(best);
+    best.clear();
+    best = new TreeSet<>((a, b) -> {
+      int comp = -Double.compare(score[a.x][a.y], score[b.x][b.y]);
+      if (comp == 0) return a.compareTo(b);
+      return -Double.compare(score[a.x][a.y], score[b.x][b.y]);
+    });
+
+    for (int x = 0; x < gameMap.width; x++) {
+      for (int y = 0; y < gameMap.height; y++) {
+        if (best.size() < (explore+growth) - potentialLocs.size()) best.add(new Position(x, y));
+        else {
+          best.add(new Position(x, y));
+          best.remove(best.last());
+        }
+      }
+    }
+
+    potentialLocs.addAll(best);
+
+    return new ArrayList<>(potentialLocs);
+  }
+
+  // TODO: This is currently BoardSize^2, but could be optimized to BoardSize * ResourceTileCount
+  private double[][] generateRawScoreMatrix(double diminishingFactor) {
+    double[][] score = new double[gameMap.width][gameMap.height];
+
     ArrayDeque<Integer> q = new ArrayDeque<>();
     for (int x = 0; x < gameMap.width; x++) {
       for (int y = 0; y < gameMap.height; y++) {
@@ -96,23 +283,38 @@ public class Surveyor {
     return score;
   }
 
-  private void applySmallCityIncentive(double[][] score) {
-    // TODO: Analyze this ratio and find a more appropriate value
-    double smallCityBuffRatio = 1.5;
-    player.cities.values().forEach(city -> {
-      if (city.citytiles.size() == 1) {
-        city.citytiles.forEach(cityTile -> {
-          for (int k = 0; k < 4; k++) {
-            int xx = cityTile.pos.x + dx[k], yy = cityTile.pos.y + dy[k];
-            if (xx < 0 || xx >= gameMap.width || yy < 0 || yy >= gameMap.height)
-              continue;
+  public void drawRawScore() {
+    double[][] score = generateRawScoreMatrix(.75);
+    removeInvalidLocations(score);
 
-            score[xx][yy] *= smallCityBuffRatio;
-          }
-        });
+    drawGrid(score);
+  }
+
+  public void drawGrid(double[][] grid) {
+    double max = 0;
+
+    String top = "    ";
+    for(int i=0;i<grid.length;i++){
+      String tmp = i+"";
+      while(tmp.length() < 5)tmp = tmp+" ";
+      top += tmp;
+    }
+    System.err.println(top);
+    for(double[] a : grid)for(double b : a)max = Math.max(b, max);
+    for (int x = 0; x < grid[0].length; x++) {
+      String line = x+"";
+      while(line.length() < 4)
+        line = line +" ";
+      for (int y = 0; y < grid.length; y++) {
+        line += String.format("%.2f", grid[y][x]/max)+" ";
       }
-    });
+      System.err.println(line);
+    }
 
+    System.err.println("====================================================================");
+  }
+
+  private void applyAntiCityDebuff(double[][] score) {
     // Debuff squares that aren't connected to other city tiles but are very close.
     double antiCityDebuffRatio = 0.4;
     player.cities.values().forEach(city -> {
@@ -140,26 +342,45 @@ public class Surveyor {
     });
   }
 
-  private int[][] getCityTileDistanceMatrix(boolean includeFullWorker) {
+  private void applySmallCityIncentive(double[][] score) {
+    // TODO: Analyze this ratio and find a more appropriate value
+    double smallCityBuffRatio = 1.5;
+    player.cities.values().forEach(city -> {
+      if (city.citytiles.size() == 1) {
+        city.citytiles.forEach(cityTile -> {
+          for (int k = 0; k < 4; k++) {
+            int xx = cityTile.pos.x + dx[k], yy = cityTile.pos.y + dy[k];
+            if (xx < 0 || xx >= gameMap.width || yy < 0 || yy >= gameMap.height)
+              continue;
+
+            score[xx][yy] *= smallCityBuffRatio;
+          }
+        });
+      }
+    });
+  }
+
+  private int[][] getCityTileDistanceMatrix(boolean useWorkerDistance) {
     int[][] dist = new int[gameMap.width][gameMap.height];
     for (int i = 0; i < dist.length; i++) Arrays.fill(dist[i], Integer.MAX_VALUE / 3);
 
     ArrayDeque<Integer> q = new ArrayDeque<>();
-    player.cities.values().forEach(city -> {
-      city.citytiles.forEach(cityTile -> {
-        dist[cityTile.pos.x][cityTile.pos.y] = 0;
-        q.add(cityTile.pos.x);
-        q.add(cityTile.pos.y);
-      });
-    });
 
-    if (includeFullWorker) {
+    if (useWorkerDistance) {
       player.units.forEach(unit -> {
         if (unit.getCargoSpaceLeft() == 0) {
           dist[unit.pos.x][unit.pos.y] = 0;
           q.add(unit.pos.x);
           q.add(unit.pos.y);
         }
+      });
+    } else {
+      player.cities.values().forEach(city -> {
+        city.citytiles.forEach(cityTile -> {
+          dist[cityTile.pos.x][cityTile.pos.y] = 0;
+          q.add(cityTile.pos.x);
+          q.add(cityTile.pos.y);
+        });
       });
     }
 
@@ -185,11 +406,12 @@ public class Surveyor {
     return dist;
   }
 
-  private void applyDistanceDebuff(double[][] score) {
-    // TODO: Including full worker here makes us significantly worse - Try again once proper routing has been done
+
+
+  private void applyDistanceDebuff(double[][] score, double diminishingFactor) {
+    // Using worker distance instead of city distance seems remarkably worse, based on simple testing
     int[][] dist = getCityTileDistanceMatrix(false);
 
-    double diminishingFactor = .9;
     double[] dimPow = new double[2 * gameMap.width + 1];
     dimPow[0] = 1;
     for (int i = 1; i < dimPow.length; i++)
@@ -224,9 +446,10 @@ public class Surveyor {
   }
 
   public ArrayList<Position> findKPotentialCityLocations(int K) {
-    final double[][] score = generateRawScoreMatrix();
-    applyDistanceDebuff(score);
+    final double[][] score = generateRawScoreMatrix(0.75);
+    applyDistanceDebuff(score, 0.9);
     applySmallCityIncentive(score);
+    applyAntiCityDebuff(score);
     removeInvalidLocations(score);
 
     TreeSet<Position> best = new TreeSet<>((a, b) -> {
@@ -264,7 +487,7 @@ public class Surveyor {
     int cycleLength = GameConstants.PARAMETERS.DAY_LENGTH + GameConstants.PARAMETERS.NIGHT_LENGTH;
     int turnsLeft = GameConstants.PARAMETERS.MAX_DAYS - gameState.turn;
     int nightTurnsLeft = (turnsLeft / cycleLength * GameConstants.PARAMETERS.NIGHT_LENGTH) +
-            Math.min(GameConstants.PARAMETERS.NIGHT_LENGTH, turnsLeft % cycleLength);
+        Math.min(GameConstants.PARAMETERS.NIGHT_LENGTH, turnsLeft % cycleLength);
     return upkeep * Math.min(nightTurnsLeft, 10);
   }
 
@@ -324,7 +547,7 @@ public class Surveyor {
 
       HashMap<String, Integer> assignedFuel = new HashMap<>();
       followFlowAndRecordFuelAssignment(convertCoordinateToInt(unit.pos.x, unit.pos.y), unit.cargo.getFuelValue(),
-              flow, assignedFuel);
+          flow, assignedFuel);
 
       for (String s : assignedFuel.keySet()) {
         list.add(new UnitCityAssignment(unit, s, assignedFuel.get(s)));
@@ -414,47 +637,18 @@ public class Surveyor {
     if (fullUnits.isEmpty()) {
       return assignments;
     }
-    int count = 0;
+
     for (Unit u : fullUnits) {
       if (!getSingleAssignment(assignments, fullUnits))
         break;
     }
-
-//    // Go ahead and send uranium to cities
-//    HashMap<City, Integer> extraFuel = new HashMap<>();
-//    for (Unit u : fullUnits) {
-//      if (assignments.containsKey(u)) continue;
-//      if (u.cargo.uranium == 0) continue;
-//
-//      double leastTurns = 100000;
-//      City best = null;
-//      for (City c : player.cities.values()) {
-//        int extra = (extraFuel.containsKey(c)) ? extraFuel.get(c) : 0;
-//        double turnsTilDead = (c.fuel + extra) / c.getLightUpkeep();
-//        if (turnsTilDead < leastTurns) {
-//          leastTurns = turnsTilDead;
-//          best = c;
-//        }
-//      }
-//
-//      if (best != null) {
-//        if (extraFuel.containsKey(best)) {
-//          extraFuel.put(best,
-//                  extraFuel.get(best) + u.cargo.uranium * GameConstants.PARAMETERS.RESOURCE_TO_FUEL_RATE.URANIUM);
-//        } else {
-//          extraFuel.put(best, u.cargo.uranium * GameConstants.PARAMETERS.RESOURCE_TO_FUEL_RATE.URANIUM);
-//        }
-//        System.err.println(TAG+": ASSIGNING URANIUM WORKER="+u.id +" to city="+best.cityid);
-//        assignments.put(u, best.cityid);
-//      }
-//    }
 
     String ass = "";
     for (Unit u : assignments.keySet())
       ass += "(" + u + "," + assignments.get(u) + ")";
 
     if (ass.length() != 0) {
-      System.err.println(TAG + " "+gameState.turn+": ASSIGNMENTS=" + ass);
+      System.err.println(TAG + " " + gameState.turn + ": ASSIGNMENTS=" + ass);
     }
 
     return assignments;

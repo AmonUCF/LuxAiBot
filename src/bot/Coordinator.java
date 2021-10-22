@@ -148,7 +148,18 @@ public class Coordinator {
         !assignments.containsKey(unit)
     ).collect(Collectors.toList());
 
-    ArrayList<Position> candidateCities = surveyor.findKPotentialCityLocations(Math.min(possibleColonizers.size(), 5));
+
+//    ArrayList<Position> candidateCities = surveyor.findKPotentialCityLocations(Math.min(possibleColonizers.size(), 5));
+    if(possibleColonizers.size() != 0)
+      System.err.println(TAG + " " + gameState.turn + ": possibleColonizers size="+possibleColonizers.size());
+
+    int growth = Math.min(possibleColonizers.size(), 5);
+    int explore = 0;
+    if (growth > 3) {
+      explore = growth-3;
+      growth = 3;
+    }
+    ArrayList<Position> candidateCities = surveyor.findPotentialCityLocations(growth, explore);
 
     /** First make sure that if a colonizer has already reached goal, we build the city here **/
     ArrayList<String> buildCityActions = new ArrayList<>();
@@ -197,8 +208,8 @@ public class Coordinator {
      * only to have the new city starve while building the next.
      */
     if (!colonizerActions.isEmpty() || !colonizers.isEmpty()) {
-      System.err.println(TAG + " " + gameState.turn + ": Colonizers: " + colonizers + " " + colonizerActions.size() + "\nNew " +
-          "Cities: " + candidateCities);
+      System.err.println(TAG + " " + gameState.turn + ": Colonizers: " + colonizers + " " + colonizerActions.size() + "\n" +
+          TAG+ ": New Cities: " + candidateCities);
     }
 
     HashSet<Unit> newColonizers = new HashSet<>();
@@ -312,9 +323,6 @@ public class Coordinator {
       }
     }
 
-    if (actions.size() != newActions.size()) {
-      System.err.println(TAG + ": REMOVING " + (actions.size() - newActions.size()) + " ACTIONS.");
-    }
     return newActions;
   }
 }

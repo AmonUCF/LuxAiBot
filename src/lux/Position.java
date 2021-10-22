@@ -64,6 +64,11 @@ public class Position {
     return x==p.x && y==p.y;
   }
 
+  public int compareTo(Position p) {
+    if (x==p.x) return y-p.y;
+    else return x-p.x;
+  }
+
   @Override
   public String toString() {
     return "(" + this.x + ", " + this.y + ")";

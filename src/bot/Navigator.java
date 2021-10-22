@@ -11,8 +11,7 @@ public class Navigator {
   final private GameState gameState;
   final private GameMap gameMap;
 
-  // 5 time layers plus 1 untimed layer
-  private final int timeLayers = 8;
+  private final int timeLayers = 5;
 
   private MinCostMaxFlow flow;
 
